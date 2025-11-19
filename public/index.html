@@ -1,1 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Parker Pong</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      font-family: Arial, sans-serif;
+      color: #fff;
+      overflow: hidden;
+    }
+    #hostContainer, #controlContainer {
+      width: 100vw;
+      height: 100vh;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    #hostContainer {
+      background: #000;
+      position: relative;
+    }
+    #gameCanvas {
+      background: #111;
+    }
+    #score {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 28px;
+      font-weight: bold;
+      text-shadow: 0 0 10px #000;
+      z-index: 10;
+    }
+    #inviteLinks {
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      font-size: 12px;
+      opacity: 0.7;
+      max-width: 90%;
+      word-wrap: break-word;
+    }
+    #controlArea {
+      width: 100vw;
+      height: 100vh;
+      background: #111;
+      touch-action: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    #controlInfo {
+      margin-bottom: 20px;
+      font-size: 18px;
+      text-align: center;
+      padding: 0 10px;
+    }
+    #controlStrip {
+      width: 80px;
+      height: 70vh;
+      background: #222;
+      border-radius: 40px;
+      border: 2px solid #555;
+      position: relative;
+    }
+    #controlKnob {
+      width: 80px;
+      height: 40px;
+      background: #0af;
+      position: absolute;
+      left: 0;
+      transform: translateY(-50%);
+      border-radius: 40px;
+      touch-action: none;
+    }
+    video {
+      display: none;
+    }
+  </style>
+</head>
+<body>
 
+  <div id="score"></div>
+
+  <!-- HOST VIEW -->
+  <div id="hostContainer">
+    <canvas id="gameCanvas" width="540" height="960"></canvas>
+    <video id="camera" autoplay playsinline muted></video>
+
+    <div id="inviteLinks">
+      <div>Player 1 URL:</div>
+      <div id="p1Link"></div>
+      <br>
+      <div>Player 2 URL:</div>
+      <div id="p2Link"></div>
+      <br>
+      <small>(Press E to end the match)</small>
+    </div>
+  </div>
+
+  <!-- CONTROLLER VIEW -->
+  <div id="controlContainer">
+    <div id="controlArea">
+      <div id="controlInfo">Drag your thumb up/down to move your paddle</div>
+      <div id="controlStrip">
+        <div id="controlKnob"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+  <script>
+    // Parse URL params
+    const params = new URLSearchParams(window.location.search);
+    let role = params.get("role") || "host";
+    let matchId = params.get("match");
+
+    // If host and no match ID, generate one
+    if (role === "host" && !matchId) {
+      matchId = Math.random().toString(36).slice(2, 8);
+      const newUrl = `${window.location.origin}${window.location.pathname}?role=host&match=${matchId}`;
+      window.history.replaceState({}, "", newUrl);
+    }
+
+    const socket = io();
+
+    socket.on("connect", () => {
+      socket.emit("join", { role, matchId });
+    });
+
+    let gameState = null;
+
+    socket.on("state", (s) => {
+      gameState = s;
+    });
+
+    // Match ended = disable controllers
+    socket.on("matchEnded", () => {
+      if (role === "p1" || role === "p2") {
+        const strip = document.getElementById("controlStrip");
+        if (strip) strip.style.pointerEvents = "none";
+        alert("Match over! Return to the TikTok LIVE stream!");
+      }
+    });
+
+
+    // ============================
+    // HOST (GAME RENDERER)
+    // ============================
+    if (role === "host") {
+      setupHost();
+    }
+    else {
+      setupController(role);
+    }
+
+
+    function setupHost() {
+      document.getElementById("hostContainer").style.display = "flex";
+
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const video = document.getElementById("camera");
+      const scoreEl = document.getElementById("score");
+
+      // Show P1/P2 URLs
+      const base = `${window.location.origin}${window.location.pathname}`;
+      document.getElementById("p1Link").textContent = `${base}?role=p1&match=${matchId}`;
+      document.getElementById("p2Link").textContent = `${base}?role=p2&match=${matchId}`;
+
+      // Webcam feed
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+        })
+        .catch(err => {
+          console.error("Camera error:", err);
+        });
+
+      function render() {
+        const w = canvas.width;
+        const h = canvas.height;
+
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, w, h);
+
+        if (!gameState) {
+          requestAnimationFrame(render);
+          return;
+        }
+
+        // Mid line
+        ctx.strokeStyle = "#333";
+        ctx.setLineDash([20, 20]);
+        ctx.beginPath();
+        ctx.moveTo(w / 2, 0);
+        ctx.lineTo(w / 2, h);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Paddles
+        const pH = 0.25 * h;
+        const pW = 20;
+
+        const p1Y = gameState.p1Y * h;
+        const p2Y = gameState.p2Y * h;
+
+        const p1X = 40;
+        const p2X = w - 40 - pW;
+
+        ctx.fillStyle = "#0af";
+        ctx.fillRect(p1X, p1Y - pH / 2, pW, pH);
+
+        ctx.fillStyle = "#fa0";
+        ctx.fillRect(p2X, p2Y - pH / 2, pW, pH);
+
+        // Ball = your head
+        const bx = gameState.ballX * w;
+        const by = gameState.ballY * h;
+        const radius = 40;
+
+        if (video.readyState >= 2) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(bx, by, radius, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(video, bx - radius, by - radius, radius * 2, radius * 2);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#fff";
+          ctx.beginPath();
+          ctx.arc(bx, by, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Score
+        scoreEl.textContent = `${gameState.score1} : ${gameState.score2}`;
+
+        requestAnimationFrame(render);
+      }
+
+      render();
+
+      // End match key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "e" || e.key === "E") {
+          socket.emit("endMatch");
+          alert("Match ended, players revoked.");
+        }
+      });
+    }
+
+
+    // ===============================
+    // CONTROLLER (PLAYER)
+    // ===============================
+    function setupController(role) {
+      document.getElementById("controlContainer").style.display = "flex";
+
+      const strip = document.getElementById("controlStrip");
+      const knob = document.getElementById("controlKnob");
+
+      function handlePointer(yClient) {
+        const rect = strip.getBoundingClientRect();
+        let rel = (yClient - rect.top) / rect.height;
+        rel = Math.max(0, Math.min(1, rel));
+        socket.emit("paddle", { y: rel });
+        knob.style.top = (rel * 100) + "%";
+      }
+
+      strip.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        strip.setPointerCapture(e.pointerId);
+        handlePointer(e.clientY);
+      });
+
+      strip.addEventListener("pointermove", (e) => {
+        if (e.buttons === 0) return;
+        e.preventDefault();
+        handlePointer(e.clientY);
+      });
+
+      strip.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+      });
+    }
+
+  </script>
+</body>
+</html>
