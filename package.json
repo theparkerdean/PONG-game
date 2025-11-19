@@ -1,1 +1,13 @@
-
+{
+  "name": "parker-pong",
+  "version": "1.0.0",
+  "description": "Parker Pong real-time head-ball multiplayer engine",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.5"
+  }
+}
